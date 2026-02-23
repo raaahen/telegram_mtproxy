@@ -27,7 +27,9 @@ install_deps() {
     if ! command -v qrencode &> /dev/null; then
         apt-get update && apt-get install -y qrencode || yum install -y qrencode
     fi
-    cp "$0" "$BINARY_PATH" && chmod +x "$BINARY_PATH"
+    if [ -f "$0" ]; then
+        cp "$0" "$BINARY_PATH" && chmod +x "$BINARY_PATH"
+    fi
 }
 
 get_ip() {
@@ -50,7 +52,6 @@ show_config() {
     echo -e "Secret: $SECRET"
     echo -e "Link: ${BLUE}$LINK${NC}"
     qrencode -t ANSIUTF8 "$LINK"
-}
 
 # --- INSTALLING ---
 menu_install() {
@@ -63,34 +64,34 @@ menu_install() {
         "lenta.ru" "rbc.ru" "ria.ru" "kommersant.ru"
         "stepik.org" "duolingo.com" "khanacademy.org" "ted.com"
     )
-    
     for i in "${!domains[@]}"; do
         printf "${YELLOW}%2d)${NC} %-20s " "$((i+1))" "${domains[$i]}"
         [[ $(( (i+1) % 2 )) -eq 0 ]] && echo ""
     done
-    
-    read -p "Your choice [1-20]: " d_idx
-    DOMAIN=${domains[$((d_idx-1))]}
-    DOMAIN=${DOMAIN:-google.com}
-
+    read -p "Your choice [1-20] (default 1): " d_idx
+    if [[ "$d_idx" =~ ^[0-9]+$ ]] && [ "$d_idx" -ge 1 ] && [ "$d_idx" -le 20 ]; then
+        DOMAIN=${domains[$((d_idx-1))]}
+    else
+        DOMAIN="google.com"
+    fi
     echo -e "\n${CYAN}--- Choose port ---${NC}"
     echo -e "1) 443 (Recommended)"
     echo -e "2) 8443"
     echo -e "3) My port"
-    read -p "Choice (number): " p_choice
+    read -p "Choice (number) [default 1]: " p_choice
     case $p_choice in
         2) PORT=8443 ;;
-        3) read -p "Insert your port: " PORT ;;
+        3)
+           read -p "Insert your port: " PORT
+           PORT=${PORT:-443} 
+           ;;
         *) PORT=443 ;;
     esac
-
     echo -e "${YELLOW}[*] Setting up proxy...${NC}"
     SECRET=$(docker run --rm nineseconds/mtg:2 generate-secret --hex "$DOMAIN")
     docker stop mtproto-proxy &>/dev/null && docker rm mtproto-proxy &>/dev/null
-    
     docker run -d --name mtproto-proxy --restart always -p "$PORT":"$PORT" \
         nineseconds/mtg:2 simple-run -n 1.1.1.1 -i prefer-ipv4 0.0.0.0:"$PORT" "$SECRET" > /dev/null
-    
     clear
     show_config
     read -p "Installing complete. Press Enter..."
@@ -99,9 +100,12 @@ menu_install() {
 # --- EXIT ---
 show_exit() {
     clear
-    show_config
+    if docker ps -a | grep -q "mtproto-proxy"; then
+        show_config
+    fi
     exit 0
 }
+
 
 # --- SCRIPT START ---
 check_root
@@ -117,7 +121,7 @@ while true; do
     case $m_idx in
         1) menu_install ;;
         2) clear; show_config; read -p "Press Enter..." ;;
-        3) docker stop mtproto-proxy && docker rm mtproto-proxy && echo "Deleted" ;;
+        3) docker stop mtproto-proxy &>/dev/null && docker rm mtproto-proxy &>/dev/null && echo -e "${GREEN}Deleted${NC}" ;;
         0) show_exit ;;
         *) echo "Bad input" ;;
     esac
